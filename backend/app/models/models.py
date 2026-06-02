@@ -62,3 +62,5 @@ class AuditoriaConfirmacao(Base):
     device_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     resposta: Mapped[str] = mapped_column(String(10), nullable=False)  # sim | nao
     confirmado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+    ronda: Mapped["Ronda"] = relationship(back_populates="auditoria")

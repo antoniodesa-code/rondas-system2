@@ -7,6 +7,7 @@ import qrcode
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -66,17 +67,13 @@ async def iniciar_ronda(
         rondas.append(ronda)
 
     await db.commit()
-    for r in rondas:
-        await db.refresh(r)
 
-    # Carregar relacionamentos
+    # Recarregar com setor já incluído (eager load)
+    ids = [r.id for r in rondas]
     result = await db.execute(
-        select(Ronda).where(Ronda.id.in_([r.id for r in rondas])).join(Setor)
+        select(Ronda).where(Ronda.id.in_(ids)).options(selectinload(Ronda.setor))
     )
     rondas_loaded = result.scalars().all()
-    # Eager load setor
-    for r in rondas_loaded:
-        _ = r.setor
 
     return [_ronda_to_out(r) for r in rondas_loaded]
 
@@ -92,13 +89,12 @@ async def rondas_hoje(
         select(Ronda)
         .join(Setor)
         .where(Ronda.tecnico_id == tecnico.id)
+        .options(selectinload(Ronda.setor))
         .order_by(Setor.nome)
     )
     rondas = result.scalars().all()
     # Filtra pelo dia de hoje no Python para compatibilidade timezone
     rondas_hoje = [r for r in rondas if r.criado_em.date() == hoje]
-    for r in rondas_hoje:
-        _ = r.setor
     return [_ronda_to_out(r) for r in rondas_hoje]
 
 
@@ -110,7 +106,10 @@ async def atualizar_ronda(
     tecnico: Tecnico = Depends(get_current_tecnico),
 ):
     result = await db.execute(
-        select(Ronda).join(Setor).where(Ronda.id == ronda_id, Ronda.tecnico_id == tecnico.id)
+        select(Ronda)
+        .join(Setor)
+        .where(Ronda.id == ronda_id, Ronda.tecnico_id == tecnico.id)
+        .options(selectinload(Ronda.setor))
     )
     ronda = result.scalar_one_or_none()
     if not ronda:
@@ -125,7 +124,12 @@ async def atualizar_ronda(
 
     await db.commit()
     await db.refresh(ronda)
-    _ = ronda.setor
+
+    # Recarregar com setor após commit
+    result2 = await db.execute(
+        select(Ronda).where(Ronda.id == ronda.id).options(selectinload(Ronda.setor))
+    )
+    ronda = result2.scalar_one()
     return _ronda_to_out(ronda)
 
 
@@ -136,7 +140,10 @@ async def gerar_qr(
     tecnico: Tecnico = Depends(get_current_tecnico),
 ):
     result = await db.execute(
-        select(Ronda).join(Setor).where(Ronda.id == ronda_id, Ronda.tecnico_id == tecnico.id)
+        select(Ronda)
+        .join(Setor)
+        .where(Ronda.id == ronda_id, Ronda.tecnico_id == tecnico.id)
+        .options(selectinload(Ronda.setor))
     )
     ronda = result.scalar_one_or_none()
     if not ronda:
